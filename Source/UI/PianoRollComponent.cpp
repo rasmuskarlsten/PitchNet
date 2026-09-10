@@ -7,6 +7,7 @@
 #include "../Utils/PitchCurveProcessor.h"
 #include "../Utils/ScaleUtils.h"
 #include "../Utils/TimingRegionUtils.h"
+#include "../Utils/Localization.h"
 #include "PianoRoll/PianoRollViewHelpers.h"
 #include "PianoRoll/VisualWaveformEnvelope.h"
 #include "PianoRoll/States/LoopDragHandler.h"
@@ -2142,7 +2143,7 @@ bool PianoRollComponent::nudgeSelectedNotesBySemitones(int semitoneDelta)
 
   for (auto *note : selectedNotes)
   {
-    if (!note || note->isRest())
+    if (!note || !note->isPitched())
       continue;
 
     const float oldMidi = note->getMidiNote();
@@ -2238,6 +2239,10 @@ bool PianoRollComponent::keyPressed(const juce::KeyPress &key)
     const int step = mods.isShiftDown() ? 12 : 1;
     return nudgeSelectedNotesBySemitones(direction * step);
   }
+
+  // U: mark the selected notes as unpitched (breath) or back to pitched.
+  if (!mods.isShiftDown() && key.getTextCharacter() == 'u')
+    return toggleUnpitchedForSelection();
 
   return false;
 }
@@ -2648,10 +2653,12 @@ std::vector<Note *> PianoRollComponent::getSelectedNotes() const
   if (!project)
     return {};
 
+  // Pitch tools consume this list; frozen (unpitched) notes are left out so a
+  // group tilt/vibrato/smooth edit never touches them.
   std::vector<Note *> selected;
   for (auto &note : project->getNotes())
   {
-    if (note.isSelected())
+    if (note.isSelected() && note.isPitched())
       selected.push_back(&note);
   }
   return selected;
@@ -2688,8 +2695,9 @@ void PianoRollComponent::updatePitchToolHandlesFromSelection()
   }
 
   // Vibrato is a hover control: no hovered note means no visible handle.
+  // Frozen (unpitched) notes expose no pitch handles at all.
   std::vector<Note *> targetNotes;
-  if (hoveredNote)
+  if (hoveredNote && hoveredNote->isPitched())
     targetNotes.push_back(hoveredNote);
 
   const auto hoverBounds = hoveredNote ? getNoteHoverShadowBounds(*hoveredNote)
@@ -2954,6 +2962,14 @@ void PianoRollComponent::showResetMenu(Note &note)
       2, std::make_unique<pitchPopupMenu::MenuItemComponent>(
              "Timing", false, std::function<void()>{}, false),
       nullptr, "Timing");
+  // Unpitched toggle (breath). The label names the action that will happen;
+  // with a multi-selection the whole selection follows the clicked note.
+  const juce::String unpitchedLabel =
+      TR(note.isUnpitched() ? "note.unpitched.off" : "note.unpitched.on");
+  menu.addCustomItem(
+      3, std::make_unique<pitchPopupMenu::MenuItemComponent>(
+             unpitchedLabel, false, std::function<void()>{}, false),
+      nullptr, unpitchedLabel);
 
   juce::Component::SafePointer<PianoRollComponent> safeThis(this);
   Note* notePtr = &note;
@@ -2971,7 +2987,86 @@ void PianoRollComponent::showResetMenu(Note &note)
       safeThis->resetNoteEdits(*notePtr);
     else if (result == 2)
       safeThis->resetNoteTiming(*notePtr);
+    else if (result == 3)
+      safeThis->setNotesUnpitched(safeThis->getResetTargetNotes(*notePtr),
+                                  !notePtr->isUnpitched());
   });
+}
+
+bool PianoRollComponent::hasUnpitchedSelection() const
+{
+  if (!project)
+    return false;
+  return std::any_of(project->getNotes().begin(), project->getNotes().end(),
+                     [](const Note &note)
+                     { return !note.isRest() && note.isSelected() &&
+                              note.isUnpitched(); });
+}
+
+bool PianoRollComponent::toggleUnpitchedForSelection()
+{
+  if (!project)
+    return false;
+
+  std::vector<Note *> targets;
+  for (auto &note : project->getNotes())
+    if (!note.isRest() && note.isSelected())
+      targets.push_back(&note);
+  if (targets.empty())
+    return false;
+
+  // Mixed selection: freeze everything first; a second press unfreezes.
+  const bool allUnpitched = std::all_of(
+      targets.begin(), targets.end(),
+      [](const Note *note) { return note->isUnpitched(); });
+  setNotesUnpitched(std::move(targets), !allUnpitched);
+  return true;
+}
+
+void PianoRollComponent::setNotesUnpitched(std::vector<Note *> notes,
+                                           bool unpitched)
+{
+  if (!project)
+    return;
+
+  // Timing-edited notes are rendered from moved audio, which cannot be mixed
+  // with pristine samples; they must be restored before they can be frozen.
+  notes.erase(std::remove_if(notes.begin(), notes.end(),
+                             [unpitched](const Note *note)
+                             {
+                               return !note || note->isRest() ||
+                                      note->isUnpitched() == unpitched ||
+                                      (unpitched &&
+                                       (note->getStartFrame() !=
+                                            note->getSrcStartFrame() ||
+                                        note->getEndFrame() !=
+                                            note->getSrcEndFrame()));
+                             }),
+              notes.end());
+  if (notes.empty())
+    return;
+
+  cancelDrawing();
+
+  juce::Component::SafePointer<PianoRollComponent> safeThis(this);
+  auto action = std::make_unique<NoteUnpitchedAction>(
+      *project, std::move(notes), unpitched, [safeThis]()
+      {
+        if (safeThis == nullptr || !safeThis->project)
+          return;
+        PitchCurveProcessor::rebuildBaseFromNotes(*safeThis->project);
+        safeThis->invalidateBasePitchCache();
+        safeThis->updatePitchToolHandlesFromSelection();
+        safeThis->updatePreviewButtonBounds();
+        if (safeThis->onPitchEdited)
+          safeThis->onPitchEdited();
+        if (safeThis->onPitchEditFinished)
+          safeThis->onPitchEditFinished();
+        safeThis->repaint();
+      });
+  action->redo();
+  if (undoManager)
+    undoManager->addAction(std::move(action));
 }
 
 void PianoRollComponent::resetNoteTiming(Note &note)

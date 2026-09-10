@@ -34,7 +34,7 @@ std::vector<TimingHandler::Boundary> TimingHandler::buildBoundaries() const
                                  { return std::abs(b.frame - frame) < 0.001f; });
     if (existing == result.end())
     {
-      result.push_back({frame, left, right, nullptr, 0.0f, 0.0f});
+      result.push_back({frame, left, right, nullptr, 0.0f, 0.0f, false});
       return;
     }
     if (left)
@@ -51,6 +51,11 @@ std::vector<TimingHandler::Boundary> TimingHandler::buildBoundaries() const
 
   for (auto& boundary : result)
   {
+    // Frozen notes keep their edges: neither the breath nor the neighbour
+    // sharing that edge may be retimed into it.
+    boundary.locked = (boundary.left && boundary.left->isUnpitched()) ||
+                      (boundary.right && boundary.right->isUnpitched());
+
     std::vector<Note*> drawnNotes;
     if (boundary.left)
       drawnNotes.push_back(boundary.left);
@@ -103,6 +108,8 @@ int TimingHandler::findBoundary(float worldX, float,
   for (size_t i = 0; i < boundaries.size(); ++i)
   {
     const auto& boundary = boundaries[i];
+    if (boundary.locked)
+      continue;
     const float x = static_cast<float>(framesToSeconds(boundary.frame) *
                                        owner_.pixelsPerSecond);
     const float distance = std::abs(worldX - x);
@@ -314,7 +321,7 @@ std::vector<TimingHandler::Boundary> TimingHandler::resolveSelection(
 {
   std::vector<Boundary> result;
   for (const auto& boundary : boundaries)
-    if (isSelected(boundary))
+    if (!boundary.locked && isSelected(boundary))
       result.push_back(boundary);
   return result;
 }
@@ -327,6 +334,8 @@ void TimingHandler::updateMarqueeSelection(float worldX)
   const float right = std::max(selectionStartX, selectionCurrentX);
   for (const auto& boundary : buildBoundaries())
   {
+    if (boundary.locked)
+      continue;
     const float x = static_cast<float>(framesToSeconds(boundary.frame) *
                                        owner_.pixelsPerSecond);
     if (x >= left && x <= right)
@@ -499,6 +508,14 @@ void TimingHandler::draw(juce::Graphics& g)
   {
     const float x = static_cast<float>(framesToSeconds(boundary.frame) *
                                        owner_.pixelsPerSecond);
+    if (boundary.locked)
+    {
+      // Wall of a frozen note: visible so the user sees why the neighbour
+      // stops there, but clearly not a handle.
+      g.setColour(APP_COLOR_TEXT_PRIMARY.withAlpha(0.28f));
+      g.fillRect(x - 0.5f, 0.0f, 1.0f, canvasHeight);
+      continue;
+    }
     const bool selected = isSelected(boundary);
     const bool hovered = std::abs(boundary.frame -
                                   hoveredBoundaryFrame) < 0.001f;

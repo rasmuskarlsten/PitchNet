@@ -56,7 +56,7 @@ Note *PitchEditor::findNoteAt(float x, float y)
 
   for (auto &note : project->getNotes())
   {
-    if (note.isRest())
+    if (!note.isPitched())
       continue;
 
     float noteX = framesToSeconds(note.getStartFrame()) *
@@ -366,6 +366,9 @@ void PitchEditor::applyPitchPoint(int frameIndex, int midiCents)
   {
     if (idx < 0 || idx >= f0Size)
       return;
+    // Frozen (unpitched) frames are never promoted to voiced by drawing.
+    if (audioData.isUnpitchedFrame(idx))
+      return;
 
     const float newFreq = midiToFreq(static_cast<float>(cents) / 100.0f);
     const float oldF0 = audioData.f0[idx];
@@ -548,14 +551,22 @@ void PitchEditor::startMultiNoteDrag(const std::vector<Note *> &notes,
   if (notes.empty() || !project)
     return;
 
-  draggedNotes = notes;
+  // Frozen (unpitched) notes ride along in the selection but never move.
+  draggedNotes.clear();
+  for (auto *candidate : notes)
+    if (candidate && candidate->isPitched())
+      draggedNotes.push_back(candidate);
+  if (draggedNotes.empty())
+    return;
+  if (hoveredNote != nullptr && !hoveredNote->isPitched())
+    hoveredNote = draggedNotes.front();
   hoveredMultiDragNote = hoveredNote;
   originalMidiNotes.clear();
   originalF0ValuesMulti.clear();
   dragStartY = y;
   multiDragSnapAnchorMidi = hoveredNote != nullptr
                                 ? hoveredNote->getMidiNote()
-                                : notes.front()->getMidiNote();
+                                : draggedNotes.front()->getMidiNote();
 
   auto &audioData = project->getAudioData();
   int f0Size = static_cast<int>(audioData.f0.size());
@@ -752,7 +763,7 @@ Note *PitchEditor::findDraggedNoteAt(float x, float y) const
 
   for (auto *note : draggedNotes)
   {
-    if (!note || note->isRest())
+    if (!note || !note->isPitched())
       continue;
 
     const float noteX = framesToSeconds(note->getStartFrame()) *

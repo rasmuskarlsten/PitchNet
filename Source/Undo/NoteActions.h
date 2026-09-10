@@ -3,6 +3,8 @@
 #include "UndoableAction.h"
 #include "../Models/Note.h"
 #include "../Models/Project.h"
+#include <algorithm>
+#include <limits>
 #include <vector>
 #include <functional>
 
@@ -412,4 +414,168 @@ private:
     Note secondNote;
     Note mergedNote;
     std::function<void()> onChanged;
+};
+
+/**
+ * Toggles the Unpitched (frozen) state of one or more notes.
+ *
+ * Freezing a note resets its pitch edits to the analysed state (the same
+ * defaults "Restore Pitch" applies), sets the note flag, and marks the note's
+ * frames in AudioData::unpitchedMask so the synthesizer blends the original
+ * audio there and every pitch tool skips it. Unfreezing clears the flag and
+ * mask. Both directions mark the note dirty and set an F0 dirty range so the
+ * next incremental synthesis pass re-commits exactly that region.
+ *
+ * The action owns everything needed to reverse itself, including the previous
+ * mask values, so undo restores a partially frozen region correctly.
+ */
+class NoteUnpitchedAction : public UndoableAction
+{
+public:
+    NoteUnpitchedAction(Project &proj, std::vector<Note *> targetNotes,
+                        bool makeUnpitched,
+                        std::function<void()> onChanged = nullptr)
+        : project(proj), notes(std::move(targetNotes)),
+          makeUnpitched(makeUnpitched), onChanged(std::move(onChanged))
+    {
+        before.reserve(notes.size());
+        for (const auto *note : notes)
+            before.push_back(NoteState::capture(*note, project.getAudioData()));
+    }
+
+    void undo() override
+    {
+        for (size_t i = 0; i < notes.size() && i < before.size(); ++i)
+            if (notes[i])
+                before[i].applyTo(*notes[i], project.getAudioData());
+        finish();
+    }
+
+    void redo() override
+    {
+        auto &audioData = project.getAudioData();
+        for (auto *note : notes)
+        {
+            if (!note)
+                continue;
+            if (makeUnpitched)
+            {
+                // A frozen breath carries no pitch edits.
+                note->setMidiNote(note->getOriginalMidiNote());
+                note->setPitchOffset(0.0f);
+                note->setTiltLeft(0.0f);
+                note->setTiltRight(0.0f);
+                note->setVibrato(1.0f);
+                note->setSmoothLeftFrames(0);
+                note->setSmoothRightFrames(0);
+                note->setDeltaScale(1.0f);
+                note->setDeltaOffset(0.0f);
+                note->clearBakedDeltaPitch();
+                note->setDeltaPitch(note->getOriginalDeltaPitch());
+            }
+            note->setUnpitched(makeUnpitched);
+            audioData.setUnpitchedRange(note->getStartFrame(),
+                                        note->getEndFrame(), makeUnpitched);
+            note->markDirty();
+            note->markSynthDirty();
+        }
+        finish();
+    }
+
+    juce::String getName() const override
+    {
+        return makeUnpitched ? "Unpitched" : "Pitched";
+    }
+
+private:
+    struct NoteState
+    {
+        float midiNote = 60.0f;
+        float pitchOffset = 0.0f;
+        float tiltLeft = 0.0f;
+        float tiltRight = 0.0f;
+        float vibrato = 1.0f;
+        int smoothLeftFrames = 0;
+        int smoothRightFrames = 0;
+        float deltaScale = 1.0f;
+        float deltaOffset = 0.0f;
+        std::vector<float> bakedDeltaPitch;
+        std::vector<float> deltaPitch;
+        bool unpitched = false;
+        int startFrame = 0;
+        int endFrame = 0;
+        std::vector<bool> maskBefore; // unpitchedMask over [startFrame, endFrame)
+
+        static NoteState capture(const Note &note, const AudioData &audioData)
+        {
+            NoteState state;
+            state.midiNote = note.getMidiNote();
+            state.pitchOffset = note.getPitchOffset();
+            state.tiltLeft = note.getTiltLeft();
+            state.tiltRight = note.getTiltRight();
+            state.vibrato = note.getVibrato();
+            state.smoothLeftFrames = note.getSmoothLeftFrames();
+            state.smoothRightFrames = note.getSmoothRightFrames();
+            state.deltaScale = note.getDeltaScale();
+            state.deltaOffset = note.getDeltaOffset();
+            state.bakedDeltaPitch = note.getBakedDeltaPitch();
+            state.deltaPitch = note.getDeltaPitch();
+            state.unpitched = note.isUnpitched();
+            state.startFrame = note.getStartFrame();
+            state.endFrame = note.getEndFrame();
+            state.maskBefore.reserve(
+                static_cast<size_t>(std::max(0, state.endFrame - state.startFrame)));
+            for (int frame = state.startFrame; frame < state.endFrame; ++frame)
+                state.maskBefore.push_back(audioData.isUnpitchedFrame(frame));
+            return state;
+        }
+
+        void applyTo(Note &note, AudioData &audioData) const
+        {
+            note.setMidiNote(midiNote);
+            note.setPitchOffset(pitchOffset);
+            note.setTiltLeft(tiltLeft);
+            note.setTiltRight(tiltRight);
+            note.setVibrato(vibrato);
+            note.setSmoothLeftFrames(smoothLeftFrames);
+            note.setSmoothRightFrames(smoothRightFrames);
+            note.setDeltaScale(deltaScale);
+            note.setDeltaOffset(deltaOffset);
+            note.setBakedDeltaPitch(bakedDeltaPitch);
+            note.setDeltaPitch(deltaPitch);
+            note.setUnpitched(unpitched);
+            for (size_t i = 0; i < maskBefore.size(); ++i)
+            {
+                const int frame = startFrame + static_cast<int>(i);
+                audioData.setUnpitchedRange(frame, frame + 1, maskBefore[i]);
+            }
+            note.markDirty();
+            note.markSynthDirty();
+        }
+    };
+
+    void finish()
+    {
+        int dirtyStart = std::numeric_limits<int>::max();
+        int dirtyEnd = std::numeric_limits<int>::min();
+        for (const auto *note : notes)
+        {
+            if (!note)
+                continue;
+            dirtyStart = std::min(dirtyStart, note->getStartFrame());
+            dirtyEnd = std::max(dirtyEnd, note->getEndFrame());
+        }
+        if (dirtyStart < dirtyEnd)
+            project.setF0DirtyRange(dirtyStart, dirtyEnd);
+        // The owner rebuilds the base/delta curves, invalidates caches and
+        // kicks off synthesis; the dirty range must already be set by then.
+        if (onChanged)
+            onChanged();
+    }
+
+    Project &project;
+    std::vector<Note *> notes;
+    bool makeUnpitched;
+    std::function<void()> onChanged;
+    std::vector<NoteState> before;
 };

@@ -93,6 +93,14 @@ bool SelectHandler::mouseDown(const juce::MouseEvent &e, float worldX,
       if (owner_.onNoteSelected)
         owner_.onNoteSelected(note);
 
+      // Frozen (unpitched) notes can be selected - that is how they are
+      // toggled back - but never dragged in pitch.
+      if (!note->isPitched())
+      {
+        owner_.repaint();
+        return true;
+      }
+
       // Capture delta slice from global dense deltaPitch for this note
       auto &audioData = project->getAudioData();
       int startFrame = note->getStartFrame();
@@ -1029,7 +1037,7 @@ void SelectHandler::mouseDoubleClick(const juce::MouseEvent &e,
 
         for (auto *selected : selectedNotes)
         {
-          if (!selected || selected->isRest())
+          if (!selected || !selected->isPitched())
             continue;
 
           float oldMidi = selected->getMidiNote();
@@ -1212,7 +1220,8 @@ bool SelectHandler::initDeltaDrag(
   std::unordered_set<int> seenFrames;
   for (auto *selected : selectedNotes)
   {
-    if (!selected || selected->isRest())
+    // Unpitched (frozen) notes never take part in a pitch drag.
+    if (!selected || !selected->isPitched())
       continue;
     targetNotesOut.push_back(selected);
 
@@ -1319,6 +1328,10 @@ void SelectHandler::applyDragBasePreview(float pitchOffsetSemitones)
   for (int i = 0; i < count; ++i)
   {
     const int frame = dragPreviewStartFrame + i;
+    // Frozen (unpitched) frames keep their analysed pitch while neighbours
+    // are dragged; the synthesizer ignores edits there anyway.
+    if (audioData.isUnpitchedFrame(frame))
+      continue;
     const float baseMidi =
         dragBasePitchSnapshot[static_cast<size_t>(i)] +
         pitchOffsetSemitones *

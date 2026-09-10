@@ -121,6 +121,7 @@ bool NoteSplitter::splitNoteAtFrame(Note* note, int splitFrame) {
     secondNote.setLyric(note->getLyric());
     secondNote.setPhoneme(note->getPhoneme());
     secondNote.setVolumeDb(note->getVolumeDb());
+    secondNote.setUnpitched(note->isUnpitched());
     secondNote.setSelected(note->isSelected());
     secondNote.setTiltLeft(note->getTiltLeft());
     secondNote.setTiltRight(note->getTiltRight());
@@ -291,13 +292,13 @@ std::pair<Note*, Note*> NoteSplitter::findMergeableNotesAt(float x, float y)
     for (size_t i = 0; i < notes.size(); ++i)
     {
         auto &left = notes[i];
-        if (left.isRest())
+        if (!left.isPitched())
             continue;
 
         for (size_t j = i + 1; j < notes.size(); ++j)
         {
             auto &right = notes[j];
-            if (right.isRest())
+            if (!right.isPitched())
                 continue;
 
             // Only expose merge on a true split: the output and source frame
@@ -329,7 +330,7 @@ std::pair<Note*, Note*> NoteSplitter::findMergeableNotesAt(float x, float y)
 
 bool NoteSplitter::mergeNotes(Note *first, Note *second)
 {
-    if (!project || !first || !second || first->isRest() || second->isRest() ||
+    if (!project || !first || !second || !first->isPitched() || !second->isPitched() ||
         first->getEndFrame() != second->getStartFrame() ||
         first->getSrcEndFrame() != second->getSrcStartFrame())
         return false;

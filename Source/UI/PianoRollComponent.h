@@ -160,6 +160,14 @@ public:
   // Cancel any transient pitch edit before undo/redo changes project history.
   void cancelDrawing();
 
+  // Unpitched (frozen) notes: breaths and other noise the pitch detector
+  // mistook for pitched material. A frozen note always plays back as the
+  // original audio and is ignored by every pitch tool until toggled back.
+  // Applies to the whole selection when more than one note is selected.
+  bool toggleUnpitchedForSelection();
+  void setNotesUnpitched(std::vector<Note *> notes, bool unpitched);
+  bool hasUnpitchedSelection() const;
+
   // View settings
   void setShowDeltaPitch(bool show)
   {

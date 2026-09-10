@@ -285,9 +285,9 @@ void PianoRollWorkspaceView::showPitchCenterPopup()
   centers->reserve(project->getNotes().size());
   const bool hasSelectedNotes = std::any_of(
       project->getNotes().begin(), project->getNotes().end(),
-      [](const Note &note) { return !note.isRest() && note.isSelected(); });
+      [](const Note &note) { return note.isPitched() && note.isSelected(); });
   for (auto &note : project->getNotes())
-    if (!note.isRest() && (!hasSelectedNotes || note.isSelected()))
+    if (note.isPitched() && (!hasSelectedNotes || note.isSelected()))
       centers->push_back(
           { &note, note.getMidiNote(), note.getLastNonMacroMidiNote() });
 

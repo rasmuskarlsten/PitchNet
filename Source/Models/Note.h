@@ -188,6 +188,17 @@ public:
     bool isRest() const { return rest; }
     void setRest(bool r) { rest = r; }
 
+    // Unpitched note (breath, sibilant, noise). The user has frozen this
+    // region: it is always rendered from the original audio and is excluded
+    // from every pitch tool, but stays visible and selectable so it can be
+    // toggled back. Unlike a rest it is a real, user-facing note.
+    bool isUnpitched() const { return unpitched; }
+    void setUnpitched(bool u) { unpitched = u; }
+
+    // True when pitch tools may act on this note. Rendering and selection
+    // deliberately keep using isRest() so unpitched notes remain clickable.
+    bool isPitched() const { return !rest && !unpitched; }
+
     // Lyric (character/syllable for this note)
     juce::String getLyric() const { return lyric; }
     void setLyric(const juce::String& text) { lyric = text; }
@@ -246,6 +257,7 @@ private:
     bool dirty = false;       // For incremental synthesis (display/trigger)
     bool synthDirty = true;   // Needs re-synthesis (separate from display dirty)
     bool rest = false;        // Rest note (silence placeholder)
+    bool unpitched = false;   // User-frozen breath/noise: original audio, no pitch edits
 
     juce::String lyric;   // Lyric text (e.g., "a", "SP" for silence)
     juce::String phoneme; // Phoneme (e.g., "a", "sp", for pronunciation)

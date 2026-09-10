@@ -47,6 +47,34 @@ juce::Colour interpolateLayeredColour(juce::Colour first,
   return third.interpolatedWith(fourth, amount * 3.0f - 2.0f);
 }
 
+// Unpitched (frozen) notes get a neutral body: no pitch colouring, and a
+// diagonal hatch so the state reads at a glance, like Melodyne's unpitched
+// blobs. The body stays selectable so the state can be toggled back.
+NoteGradientColours getUnpitchedGradientColours()
+{
+  return {juce::Colour(0xFF8C8C8Cu), juce::Colour(0xFF5C5C5Cu)};
+}
+
+void drawUnpitchedHatch(juce::Graphics &g, const juce::Path &body)
+{
+  const auto bounds = body.getBounds();
+  if (bounds.isEmpty())
+    return;
+  juce::Graphics::ScopedSaveState state(g);
+  g.reduceClipRegion(body, juce::AffineTransform());
+  g.setColour(juce::Colours::black.withAlpha(0.22f));
+  g.fillRect(bounds);
+  g.setColour(juce::Colours::white.withAlpha(0.22f));
+  constexpr float spacing = 6.0f;
+  const float span = bounds.getWidth() + bounds.getHeight();
+  for (float offset = -bounds.getHeight(); offset < span; offset += spacing)
+  {
+    g.drawLine(bounds.getX() + offset, bounds.getBottom(),
+               bounds.getX() + offset + bounds.getHeight(), bounds.getY(),
+               1.0f);
+  }
+}
+
 NoteGradientColours getNoteGradientColours(float midi, int pitchReferenceHz)
 {
   static const juce::Colour inTuneCentre(0xFF1983E0u);
@@ -314,8 +342,12 @@ void NoteRenderer::draw(juce::Graphics &g, Pass pass, bool splitModeActive,
     if (drawBodies)
     {
       const NoteGradientColours noteColours =
-          getNoteGradientColours(note.getAdjustedMidiNote(), pitchReferenceHz);
+          note.isUnpitched()
+              ? getUnpitchedGradientColours()
+              : getNoteGradientColours(note.getAdjustedMidiNote(),
+                                       pitchReferenceHz);
       juce::Rectangle<float> noteVisualBounds(x, y, renderedWidth, h);
+      juce::Path bodyPath; // whatever shape ends up filled, for the hatch
 
       const float *samples = globalSamples;
       int totalSamples = globalTotalSamples;
@@ -357,6 +389,7 @@ void NoteRenderer::draw(juce::Graphics &g, Pass pass, bool splitModeActive,
                                 noteVisualBounds.getCentreY(), noteColours);
 
           g.fillRoundedRectangle(x, y, renderedWidth, h, 2.0f);
+          bodyPath.addRoundedRectangle(x, y, renderedWidth, h, 2.0f);
 
           if (isPreviewPlaybackNote)
           {
@@ -461,6 +494,7 @@ void NoteRenderer::draw(juce::Graphics &g, Pass pass, bool splitModeActive,
 
           waveformPath.closeSubPath();
           noteVisualBounds = waveformPath.getBounds();
+          bodyPath = waveformPath;
 
           if (isPreviewPlaybackNote)
           {
@@ -499,6 +533,7 @@ void NoteRenderer::draw(juce::Graphics &g, Pass pass, bool splitModeActive,
                               noteColours);
 
         g.fillRoundedRectangle(x, y, renderedWidth, h, 2.0f);
+        bodyPath.addRoundedRectangle(x, y, renderedWidth, h, 2.0f);
 
         if (isPreviewPlaybackNote)
         {
@@ -520,6 +555,9 @@ void NoteRenderer::draw(juce::Graphics &g, Pass pass, bool splitModeActive,
 
         noteVisualBounds = {x, y, renderedWidth, h};
       }
+
+      if (note.isUnpitched())
+        drawUnpitchedHatch(g, bodyPath);
 
       if (showSelectionStatus && note.isSelected())
       {

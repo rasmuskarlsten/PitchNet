@@ -32,6 +32,10 @@ private:
     Note* restCompanion = nullptr;
     float top = 0.0f;
     float bottom = 0.0f;
+    // An edge shared with an unpitched (frozen) note. It is still built so
+    // the frozen note acts as a wall for its neighbours, but it can never be
+    // hovered, selected or dragged.
+    bool locked = false;
   };
 
   struct BoundaryKey

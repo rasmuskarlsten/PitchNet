@@ -2326,7 +2326,7 @@ void MainComponent::finishPreviewRegion(bool restorePosition)
 
 void MainComponent::auditionDraggedNote(const Note &note)
 {
-  if (!dragAuditionEnabled || !resampledLoopAudition || note.isRest())
+  if (!dragAuditionEnabled || !resampledLoopAudition || !note.isPitched())
     return;
 
   std::vector<float> source;
@@ -3155,6 +3155,8 @@ void MainComponent::updateHostAudioTimelineOffset(double timelineOffsetSeconds)
   repadFloatVector(audioData.deltaPitch);
   repadBoolVector(audioData.voicedMask);
   repadBoolVector(audioData.vadMask);
+  if (!audioData.unpitchedMask.empty())
+    repadBoolVector(audioData.unpitchedMask);
 
   auto shiftFrame = [frameDelta](int frame)
   {
@@ -3500,6 +3502,7 @@ void MainComponent::getAllCommands(juce::Array<juce::CommandID> &commands)
       CommandIDs::undo,
       CommandIDs::redo,
       CommandIDs::selectAll,
+      CommandIDs::toggleUnpitched,
 
       // View commands
       CommandIDs::showSettings,
@@ -3596,6 +3599,15 @@ void MainComponent::getCommandInfo(juce::CommandID commandID,
     result.setInfo(TR("command.select_all"), TR("command.select_all.desp"), "Edit", 0);
     result.addDefaultKeypress('a', primaryModifier);
     result.setActive(project != nullptr);
+    break;
+
+  case CommandIDs::toggleUnpitched:
+    result.setInfo(TR("command.toggle_unpitched"),
+                   TR("command.toggle_unpitched.desp"), "Edit", 0);
+    result.addDefaultKeypress('u', juce::ModifierKeys::noModifiers);
+    result.setActive(project != nullptr &&
+                     !project->getSelectedNotes().empty());
+    result.setTicked(pianoRoll.hasUnpitchedSelection());
     break;
 
   // View commands
@@ -3753,6 +3765,9 @@ bool MainComponent::perform(const ApplicationCommandTarget::InvocationInfo &info
       pianoRoll.repaint();
     }
     return true;
+
+  case CommandIDs::toggleUnpitched:
+    return pianoRoll.toggleUnpitchedForSelection();
 
   // View commands
   case CommandIDs::showSettings:

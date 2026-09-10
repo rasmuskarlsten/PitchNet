@@ -264,7 +264,9 @@ void OverviewPanel::paintStaticContent(juce::Graphics &g) {
 
         float midi = note.getAdjustedMidiNote();
         const auto noteColour =
-            getNoteGradientColours(midi, pitchReferenceHz).side;
+            note.isUnpitched()
+                ? juce::Colour(0xFF6A6A6Au) // frozen breath: neutral grey
+                : getNoteGradientColours(midi, pitchReferenceHz).side;
 
         const float x1 = content.getX() +
                          static_cast<float>((startTime / timelineDuration) *

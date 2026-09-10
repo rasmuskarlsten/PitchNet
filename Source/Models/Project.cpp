@@ -238,9 +238,24 @@ std::vector<float> Project::getAdjustedF0ForRange(int startFrame, int endFrame) 
     const int rangeSize = endFrame - startFrame;
     std::vector<float> adjustedF0(static_cast<size_t>(rangeSize), 0.0f);
 
+    // Frozen (unpitched) frames ignore every edit and the global offset: the
+    // vocoder gets the analysed dense F0 so anything it renders under the
+    // blend ramps stays an identity resynthesis of the breath, never a
+    // pitched version of it.
+    const auto& frozenSource =
+        audioData.denseF0.empty() ? audioData.baseF0 : audioData.denseF0;
+
     for (int i = 0; i < rangeSize; ++i)
     {
         const int globalIdx = startFrame + i;
+        if (audioData.isUnpitchedFrame(globalIdx) &&
+            globalIdx < static_cast<int>(frozenSource.size()) &&
+            frozenSource[static_cast<size_t>(globalIdx)] > 0.0f)
+        {
+            adjustedF0[static_cast<size_t>(i)] =
+                frozenSource[static_cast<size_t>(globalIdx)];
+            continue;
+        }
         const float base = audioData.basePitch[static_cast<size_t>(globalIdx)];
         const float delta = (globalIdx < static_cast<int>(audioData.deltaPitch.size()))
                                 ? audioData.deltaPitch[static_cast<size_t>(globalIdx)]
@@ -250,6 +265,17 @@ std::vector<float> Project::getAdjustedF0ForRange(int startFrame, int endFrame) 
     }
 
     return adjustedF0;
+}
+
+void Project::rebuildUnpitchedMaskFromNotes(bool clearFirst)
+{
+    if (clearFirst)
+        audioData.unpitchedMask.clear();
+    else if (audioData.hasUnpitchedFrames())
+        return;
+    for (const auto& note : notes)
+        if (note.isUnpitched())
+            audioData.setUnpitchedRange(note.getStartFrame(), note.getEndFrame(), true);
 }
 
 void Project::setLoopRange(double startSeconds, double endSeconds)

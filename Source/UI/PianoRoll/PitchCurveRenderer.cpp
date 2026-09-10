@@ -138,7 +138,7 @@ void PitchCurveRenderer::draw(juce::Graphics &g, const Params &params)
 
     for (const auto &note : project->getNotes())
     {
-      if (note.isRest())
+      if (!note.isPitched())
         continue;
 
       const int startFrame = note.getStartFrame();

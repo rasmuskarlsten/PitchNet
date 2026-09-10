@@ -1051,6 +1051,9 @@ void EditorController::analyzeAudioAsync(
           projectCopy->getAudioData().basePitch;
       project->getAudioData().deltaPitch =
           projectCopy->getAudioData().deltaPitch;
+      // The frame grid was rebuilt; the frozen-frame overlay follows the
+      // notes that carry the Unpitched flag (none after a fresh detection).
+      project->rebuildUnpitchedMaskFromNotes(true);
       if (onProjectReady)
         onProjectReady(*project);
       if (onProjectChanged)
@@ -1079,6 +1082,8 @@ void EditorController::segmentIntoNotesAsync(
         return;
 
       project->getNotes() = projectCopy->getNotes();
+      project->getAudioData().unpitchedMask =
+          projectCopy->getAudioData().unpitchedMask;
 
       if (onProjectReady)
         onProjectReady(*project);
@@ -1094,6 +1099,9 @@ void EditorController::segmentIntoNotes(Project &targetProject,
   auto &audioData = targetProject.getAudioData();
   auto &notes = targetProject.getNotes();
   notes.clear();
+  // Notes are regenerated from scratch, so no frozen (unpitched) note
+  // survives; the frame overlay that belonged to them goes with them.
+  audioData.unpitchedMask.clear();
   audioData.segmentChunkRanges.clear();
   audioData.segmentDebugChunks.clear();
 

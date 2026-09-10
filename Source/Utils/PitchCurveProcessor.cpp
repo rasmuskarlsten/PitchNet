@@ -39,7 +39,7 @@ namespace
         const Note* prevNote = nullptr;
         int prevNoteEndFrame = -1;
         for (const auto& candidate : allNotes) {
-            if (&candidate == &targetNote || candidate.isRest())
+            if (&candidate == &targetNote || !candidate.isPitched())
                 continue;
             const int candidateEnd = candidate.getEndFrame();
             if (candidateEnd <= targetNote.getStartFrame() && candidateEnd > prevNoteEndFrame) {
@@ -51,7 +51,7 @@ namespace
         const Note* nextNote = nullptr;
         int nextNoteStartFrame = std::numeric_limits<int>::max();
         for (const auto& candidate : allNotes) {
-            if (&candidate == &targetNote || candidate.isRest())
+            if (&candidate == &targetNote || !candidate.isPitched())
                 continue;
             const int candidateStart = candidate.getStartFrame();
             if (candidateStart >= targetNote.getEndFrame() && candidateStart < nextNoteStartFrame) {

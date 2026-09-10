@@ -8,7 +8,7 @@
 namespace
 {
 constexpr std::uint32_t kProjectArchiveMagic = 0x504E4152u; // PNAR
-constexpr int kProjectArchiveVersion = 9;
+constexpr int kProjectArchiveVersion = 10; // 10: unpitchedMask
 constexpr int kProjectArchiveHasOriginalWaveform = 1 << 0;
 constexpr int kProjectArchiveHasMelSpectrogram = 1 << 1;
 constexpr int kProjectArchiveHasRenderedWaveform = 1 << 2;
@@ -490,6 +490,7 @@ bool ProjectSerializer::fromJson(Project& project, const juce::var& json) {
         }
     }
 
+    project.rebuildUnpitchedMaskFromNotes(false);
     project.setModified(false);
     return true;
 }
@@ -530,6 +531,7 @@ bool ProjectSerializer::toBinaryArchive(const Project& project,
         !writeFloatVector(out, audioData.deltaPitch) ||
         !writeBoolVector(out, audioData.voicedMask) ||
         !writeBoolVector(out, audioData.vadMask) ||
+        !writeBoolVector(out, audioData.unpitchedMask) ||
         (includeSourceDerivedData &&
          !writeMel(out, audioData.melSpectrogram)))
         return false;
@@ -632,6 +634,12 @@ bool ProjectSerializer::fromBinaryArchive(Project& project, const void* data,
         !readBoolVector(in, audioData.voicedMask) ||
         !readBoolVector(in, audioData.vadMask))
         return false;
+    if (archiveVersion >= 10) {
+        if (!readBoolVector(in, audioData.unpitchedMask))
+            return false;
+    } else {
+        audioData.unpitchedMask.clear();
+    }
     if (hasMelSpectrogram) {
         if (!readMel(in, audioData.melSpectrogram))
             return false;
@@ -752,6 +760,7 @@ bool ProjectSerializer::fromBinaryArchive(Project& project, const void* data,
     if (audioData.denseF0.empty())
         audioData.denseF0 = audioData.f0;
 
+    project.rebuildUnpitchedMaskFromNotes(false);
     project.setModified(false);
     return true;
 }
@@ -771,6 +780,8 @@ juce::var ProjectSerializer::noteToJson(const Note& note,
     obj->setProperty("pitchOffset", note.getPitchOffset());
     obj->setProperty("volumeDb", note.getVolumeDb());
     obj->setProperty("rest", note.isRest());
+    if (note.isUnpitched())
+        obj->setProperty("unpitched", true);
 
     // Lyric/Phoneme
     if (note.hasLyric())
@@ -835,6 +846,7 @@ bool ProjectSerializer::noteFromJson(Note& note, const juce::var& json,
     note.setPitchOffset(static_cast<float>(json.getProperty("pitchOffset", 0.0)));
     note.setVolumeDb(static_cast<float>(json.getProperty("volumeDb", 0.0)));
     note.setRest(json.getProperty("rest", false));
+    note.setUnpitched(json.getProperty("unpitched", false));
 
     // Lyric/Phoneme
     auto lyric = json.getProperty("lyric", juce::var());
@@ -896,6 +908,8 @@ juce::var ProjectSerializer::pitchDataToJson(const AudioData& audioData) {
     obj->setProperty("deltaPitch", floatArrayToString(audioData.deltaPitch, 4));
     obj->setProperty("voicedMask", boolArrayToString(audioData.voicedMask));
     obj->setProperty("vadMask", boolArrayToString(audioData.vadMask));
+    if (audioData.hasUnpitchedFrames())
+        obj->setProperty("unpitchedMask", boolArrayToString(audioData.unpitchedMask));
 
     return juce::var(obj);
 }
@@ -918,6 +932,8 @@ bool ProjectSerializer::pitchDataFromJson(AudioData& audioData, const juce::var&
     audioData.deltaPitch = stringToFloatArray(json.getProperty("deltaPitch", "").toString());
     audioData.voicedMask = stringToBoolArray(json.getProperty("voicedMask", "").toString());
     audioData.vadMask = stringToBoolArray(json.getProperty("vadMask", "").toString());
+    audioData.unpitchedMask =
+        stringToBoolArray(json.getProperty("unpitchedMask", "").toString());
 
     if (audioData.rawF0.empty()) {
         audioData.rawF0 = audioData.f0;

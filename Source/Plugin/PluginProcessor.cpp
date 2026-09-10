@@ -1460,6 +1460,7 @@ void PitchNetAudioProcessor::removeAraRegionFromProject(
   clearFloats(audio.deltaPitch);
   clearBools(audio.voicedMask);
   clearBools(audio.vadMask);
+  clearBools(audio.unpitchedMask); // frozen frames of a removed region
   for (int i = firstFrame;
        i < std::min(lastFrame, static_cast<int>(audio.melSpectrogram.size()));
        ++i)
@@ -1610,6 +1611,9 @@ void PitchNetAudioProcessor::analyzeAndMergeAraRegion(
         mergeFloats(dst.deltaPitch, src.deltaPitch);
         mergeBools(dst.voicedMask, src.voicedMask);
         mergeBools(dst.vadMask, src.vadMask);
+        if (!dst.unpitchedMask.empty())
+          mergeBools(dst.unpitchedMask,
+                     std::vector<bool>(src.voicedMask.size(), false));
         dst.melSpectrogram.resize(
             std::max(dst.melSpectrogram.size(),
                      static_cast<size_t>(frameOffset) +
@@ -1784,6 +1788,11 @@ void PitchNetAudioProcessor::requestCapturedAudioAnalysis(
           mergeFloats(dst.deltaPitch, src.deltaPitch);
           mergeBools(dst.voicedMask, src.voicedMask);
           mergeBools(dst.vadMask, src.vadMask);
+          // A freshly analysed region carries no frozen frames; clear ours
+          // over its span so a stale overlay never outlives its notes.
+          if (!dst.unpitchedMask.empty())
+            mergeBools(dst.unpitchedMask,
+                       std::vector<bool>(src.voicedMask.size(), false));
           dst.melSpectrogram.resize(
               std::max(dst.melSpectrogram.size(),
                        static_cast<size_t>(frameOffset) +

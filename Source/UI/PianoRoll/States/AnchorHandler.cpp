@@ -244,7 +244,7 @@ bool AnchorHandler::apply()
 
   for (auto& note : project.getNotes())
   {
-    if (note.isRest() || note.getEndFrame() <= firstFrame ||
+    if (!note.isPitched() || note.getEndFrame() <= firstFrame ||
         note.getStartFrame() > lastFrame)
       continue;
 
@@ -341,7 +341,7 @@ bool AnchorHandler::frameBelongsToPitchNote(int frame) const
                      owner_.project->getNotes().end(),
                      [frame](const Note& note)
                      {
-                       return !note.isRest() && note.getStartFrame() <= frame &&
+                       return note.isPitched() && note.getStartFrame() <= frame &&
                               note.getEndFrame() > frame;
                      });
 }
@@ -377,7 +377,7 @@ void AnchorHandler::captureOriginalCurveIfNeeded()
   originalNoteStates.clear();
   originalNoteStates.reserve(owner_.project->getNotes().size());
   for (auto& note : owner_.project->getNotes())
-    if (!note.isRest())
+    if (note.isPitched())
       originalNoteStates.push_back(
           {&note, TransformParams::fromNote(note), note.getBakedDeltaPitch()});
 }
@@ -437,7 +437,7 @@ void AnchorHandler::updateAffectedNotePositions()
 
   for (auto& note : owner_.project->getNotes())
   {
-    if (note.isRest() || note.getEndFrame() <= firstFrame ||
+    if (!note.isPitched() || note.getEndFrame() <= firstFrame ||
         note.getStartFrame() > lastFrame)
       continue;
 
@@ -479,7 +479,7 @@ void AnchorHandler::applyPreviewToProject()
 
   for (auto& note : project.getNotes())
   {
-    if (note.isRest() || note.getEndFrame() <= firstFrame ||
+    if (!note.isPitched() || note.getEndFrame() <= firstFrame ||
         note.getStartFrame() > lastFrame)
       continue;
 

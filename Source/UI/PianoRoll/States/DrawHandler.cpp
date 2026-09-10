@@ -218,6 +218,10 @@ void DrawHandler::applyPitchPoint(int frameIndex, int midiCents) {
     startNewPitchCurve(frameIndex, midiCents);
     // First point of the new curve: apply and exit
     auto applyFrameFirst = [&](int idx, int cents) {
+      // Frozen (unpitched) frames are never promoted to voiced by drawing;
+      // the curve simply passes over the breath.
+      if (audioData.isUnpitchedFrame(idx))
+        return;
       const float newFreq = midiToFreq(static_cast<float>(cents) / 100.0f);
       const float oldF0 = audioData.f0[idx];
       const float oldDelta =
@@ -269,6 +273,9 @@ void DrawHandler::applyPitchPoint(int frameIndex, int midiCents) {
 
   auto applyFrame = [&](int idx, int cents) {
     if (idx < 0 || idx >= f0Size)
+      return;
+    // Frozen (unpitched) frames are never promoted to voiced by drawing.
+    if (audioData.isUnpitchedFrame(idx))
       return;
 
     const float newFreq = midiToFreq(static_cast<float>(cents) / 100.0f);

@@ -671,6 +671,18 @@ IncrementalSynthesizer::generateBlendMask(int startFrame, int endFrame,
     }
   }
 
+  // Step 1b: user-frozen (unpitched) frames always keep the original audio,
+  // regardless of run length or what the detector thought of them. This is
+  // the whole point of the Unpitched toggle: a breath the pitch detector
+  // called voiced is never handed to the vocoder as pitched material.
+  {
+    const auto &audioData = project->getAudioData();
+    for (int i = 0; i < numFrames; ++i) {
+      if (audioData.isUnpitchedFrame(startFrame + i))
+        frameMask[i] = 0.0f;
+    }
+  }
+
   // Step 2: expand to per-sample (sample-and-hold)
   std::vector<float> mask(numSamples, 0.0f);
   for (int i = 0; i < numFrames; ++i) {

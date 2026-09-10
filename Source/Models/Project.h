@@ -2,6 +2,7 @@
 
 #include "../JuceHeader.h"
 #include "Note.h"
+#include <algorithm>
 #include <vector>
 #include <memory>
 #include <utility>
@@ -52,8 +53,44 @@ struct AudioData
     std::vector<float> deltaPitch;                       // [T] delta pitch in MIDI (dense)
     std::vector<bool> voicedMask;                        // [T] uv mask (true = voiced, F0-based)
     std::vector<bool> vadMask;                           // [T] energy-based VAD (true = has audio energy, captures consonants)
+    // [T] user-frozen frames (breaths, sibilants). An overlay on top of the
+    // analysis: never modified by detection, only by the Unpitched toggle.
+    // Frozen frames always blend from the original audio, feed the vocoder
+    // the analysed (not edited) F0, and are skipped by every pitch tool.
+    // Empty means "nothing frozen" - every reader must treat it as optional.
+    std::vector<bool> unpitchedMask;
     std::vector<std::pair<int, int>> segmentChunkRanges; // [N] GAME slicer chunks in frame range [start, end)
     std::vector<SegmentDebugChunk> segmentDebugChunks;   // raw GAME outputs for debug visualization
+
+    bool isUnpitchedFrame(int frame) const
+    {
+        return frame >= 0 && frame < static_cast<int>(unpitchedMask.size()) &&
+               unpitchedMask[static_cast<size_t>(frame)];
+    }
+
+    bool hasUnpitchedFrames() const
+    {
+        for (bool frozen : unpitchedMask)
+            if (frozen)
+                return true;
+        return false;
+    }
+
+    // Mark [startFrame, endFrame) frozen or not. Grows the mask lazily to the
+    // analysis frame count so projects without any frozen frames carry an
+    // empty vector.
+    void setUnpitchedRange(int startFrame, int endFrame, bool frozen)
+    {
+        const int totalFrames = std::max({getNumFrames(),
+                                          static_cast<int>(f0.size()),
+                                          static_cast<int>(voicedMask.size())});
+        if (unpitchedMask.size() < static_cast<size_t>(totalFrames))
+            unpitchedMask.resize(static_cast<size_t>(totalFrames), false);
+        const int first = std::max(0, startFrame);
+        const int last = std::min(endFrame, static_cast<int>(unpitchedMask.size()));
+        for (int frame = first; frame < last; ++frame)
+            unpitchedMask[static_cast<size_t>(frame)] = frozen;
+    }
 
     float getDuration() const
     {
@@ -211,6 +248,13 @@ public:
 
     // Get adjusted F0 for a specific frame range
     std::vector<float> getAdjustedF0ForRange(int startFrame, int endFrame) const;
+
+    // The per-note Unpitched flag is the user-facing state; the frame mask is
+    // what the synthesizer and the tools read. Rebuilds the mask from the
+    // flags. With clearFirst=false an existing mask is kept (file load: the
+    // mask may hold partial-note regions); with clearFirst=true the mask is
+    // regenerated from scratch (after analysis replaced the frame grid).
+    void rebuildUnpitchedMaskFromNotes(bool clearFirst);
 
     // Get frame range that needs resynthesis (based on dirty notes)
     // Returns {-1, -1} if no dirty notes
